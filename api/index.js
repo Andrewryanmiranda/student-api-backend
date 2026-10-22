@@ -2,13 +2,16 @@
 const connectToDatabase = require('../db');
 const mongoose = require('mongoose');
 
-// Define the database schema for the student project
-const RecordSchema = new mongoose.Schema({
-  title: String,
-  content: String
-}, { timestamps: true });
+// Schema: one attendance record per student per class
+const AttendanceSchema = new mongoose.Schema({
+  studentName: { type: String, required: true, trim: true },
+  date:        { type: Date,   required: true },
+  subjectName: { type: String, required: true, trim: true },
+  section:     { type: String, required: true, trim: true }
+}, { timestamps: true, collection: 'daily_attendance' });
 
-const Record = mongoose.models.Record || mongoose.model('Record', RecordSchema);
+const Attendance =
+  mongoose.models.Attendance || mongoose.model('Attendance', AttendanceSchema);
 
 module.exports = async (req, res) => {
   // Enable CORS so GitHub Pages can communicate with this API
@@ -24,15 +27,21 @@ module.exports = async (req, res) => {
   try {
     await connectToDatabase();
 
-    // Handle fetching data (GET)
+    // Fetch all records, newest date first (GET)
     if (req.method === 'GET') {
-      const records = await Record.find({}).sort({ createdAt: -1 });
+      const records = await Attendance.find({}).sort({ date: -1, createdAt: -1 });
       return res.status(200).json(records);
     }
 
-    // Handle submitting new data (POST)
+    // Save a new record (POST)
     if (req.method === 'POST') {
-      const newRecord = await Record.create(req.body);
+      const { studentName, date, subjectName, section } = req.body || {};
+      if (!studentName || !date || !subjectName || !section) {
+        return res.status(400).json({
+          error: 'studentName, date, subjectName and section are required'
+        });
+      }
+      const newRecord = await Attendance.create({ studentName, date, subjectName, section });
       return res.status(201).json(newRecord);
     }
 
