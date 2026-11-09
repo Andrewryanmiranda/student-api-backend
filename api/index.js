@@ -1,8 +1,8 @@
-// api/index.js
+// api/index.js  -  Attendance Management Portal API (Vercel serverless function)
 const connectToDatabase = require('../db');
 const mongoose = require('mongoose');
 
-// Matches the existing daily_attendance documents:
+// Matches the daily_attendance documents in LabAttendanceDB_Miranda:
 // { studentName, subjectName, section, dates: [{ date, status }] }
 const AttendanceSchema = new mongoose.Schema({
   studentName: { type: String, required: true, trim: true },
@@ -22,7 +22,7 @@ const validDate = (v) => !isNaN(new Date(v).getTime());
 const day = (v) => new Date(v).toISOString().slice(0, 10);
 
 module.exports = async (req, res) => {
-  // Enable CORS so GitHub Pages can communicate with this API
+  // CORS so the GitHub Pages frontend can call this API
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -35,13 +35,14 @@ module.exports = async (req, res) => {
   try {
     await connectToDatabase();
 
-    // ---------- READ: all students ----------
+    // ---------- READ ----------
     if (req.method === 'GET') {
       const records = await Attendance.find({}).sort({ studentName: 1 });
       return res.status(200).json(records);
     }
 
-    // ---------- CREATE: add an attendance date for a student ----------
+    // ---------- CREATE ----------
+    // body: { studentName, date, subjectName, section, status }
     if (req.method === 'POST') {
       const { studentName, date, subjectName, section, status } = req.body || {};
       if (!studentName || !date || !subjectName || !section) {
@@ -79,8 +80,9 @@ module.exports = async (req, res) => {
     }
 
     // ---------- UPDATE ----------
-    // Edit student info:  { id, studentName, subjectName, section }
-    // Edit one date:      { id, date, newDate?, status? }
+    // body: { id, studentName?, subjectName?, section?, date?, newDate?, status? }
+    //  - studentName / subjectName / section change the student's record
+    //  - date (+ newDate / status) edits one attendance date
     if (req.method === 'PUT') {
       const { id, studentName, subjectName, section, date, newDate, status } = req.body || {};
       if (!id || !mongoose.isValidObjectId(id)) {
@@ -107,19 +109,20 @@ module.exports = async (req, res) => {
           }
           entry.date = new Date(newDate);
         }
-      } else {
-        if (studentName) doc.studentName = studentName.trim();
-        if (subjectName) doc.subjectName = subjectName.trim();
-        if (section) doc.section = section.trim();
       }
+
+      if (studentName) doc.studentName = studentName.trim();
+      if (subjectName) doc.subjectName = subjectName.trim();
+      if (section) doc.section = section.trim();
 
       await doc.save();
       return res.status(200).json(doc);
     }
 
     // ---------- DELETE ----------
-    // /api/index?id=<id>               -> delete the whole student record
-    // /api/index?id=<id>&date=YYYY-MM-DD -> delete just that date
+    // /api/index?id=<id>                  -> delete the whole student record
+    // /api/index?id=<id>&date=YYYY-MM-DD  -> delete one attendance date
+    //                                        (the student is removed too if no dates remain)
     if (req.method === 'DELETE') {
       const { id, date } = req.query || {};
       if (!id || !mongoose.isValidObjectId(id)) {
@@ -130,7 +133,13 @@ module.exports = async (req, res) => {
         if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
         const doc = await Attendance.findById(id);
         if (!doc) return res.status(404).json({ error: 'Record not found' });
+
         doc.dates = doc.dates.filter(d => day(d.date) !== day(date));
+
+        if (doc.dates.length === 0) {
+          await Attendance.findByIdAndDelete(id);
+          return res.status(200).json({ ok: true, removedStudent: true });
+        }
         await doc.save();
         return res.status(200).json(doc);
       }
